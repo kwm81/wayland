@@ -276,11 +276,18 @@ is_debugger_attached(void)
 	if (pid == -1)
 		return 0;
 
+#ifdef __FreeBSD__
+/* XXX review ptrace() usage */
+#define PTRACE_ATTACH PT_ATTACH
+#define PTRACE_CONT PT_CONTINUE
+#define PTRACE_DETACH PT_DETACH
+#endif
+
 	if (pid == 0) {
 		int ppid = getppid();
 		if (ptrace(PTRACE_ATTACH, ppid, NULL, NULL) == 0) {
 			waitpid(ppid, NULL, 0);
-			ptrace(PTRACE_CONT, NULL, NULL);
+			ptrace(PTRACE_CONT, NULL, NULL, NULL);
 			ptrace(PTRACE_DETACH, ppid, NULL, NULL);
 			rc = 0;
 		} else {
