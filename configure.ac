@@ -65,6 +65,9 @@ AC_CHECK_DECL(CLOCK_MONOTONIC,[],
 	      [[#include <time.h>]])
 AC_CHECK_HEADERS([execinfo.h])
 
+# Credential support on FreeBSD
+AC_CHECK_HEADERS([sys/ucred.h])
+
 # dlopen()
 AC_CHECK_LIB([dl], [dlsym], [DL_LIBS=-ldl])
 AC_SUBST([DL_LIBS])
