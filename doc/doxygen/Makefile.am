@@ -32,7 +32,7 @@ diagram_maps := $(patsubst $(diagramsdir)/%,xml/%,$(diagramssrc:.gv=.map))
 # find all man/man3/wl_foo.3 pages
 # for this to work, we need to create them before the man target (hence
 # all-local below)
-dist_man3_MANS = $(shell test -d man && find man/man3 -name "wl_*.3" -printf "man/man3/%P\n")
+dist_man3_MANS = $(shell test -d man && find man/man3 -name "wl_*.3")
 
 # Listing various directories that might need to be created.
 alldirs := xml xml/Client xml/Server man/man3
