@@ -52,6 +52,10 @@ AC_CHECK_DECL(CLOCK_MONOTONIC,[],
 	      [[#include <time.h>]])
 AC_CHECK_HEADERS([execinfo.h])
 
+# dlopen()
+AC_CHECK_LIB([dl], [dlsym], [DL_LIBS=-ldl])
+AC_SUBST([DL_LIBS])
+
 AC_ARG_ENABLE([scanner],
               [AC_HELP_STRING([--disable-scanner],
                               [Disable compilation of wayland-scanner])],
