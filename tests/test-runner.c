@@ -68,7 +68,7 @@ int leak_check_enabled;
 
 /* when this var is set to 0, every call to test_set_timeout() is
  * suppressed - handy when debugging the test. Can be set by
- * WAYLAND_TEST_NO_TIMEOUTS environment variable. */
+ * WAYLAND_TESTS_NO_TIMEOUTS evnironment var */
 static int timeouts_enabled = 1;
 
 /* set to one if the output goes to the terminal */
@@ -352,6 +352,13 @@ is_debugger_attached(void)
 #define PTRACE_DETACH PT_DETACH
 #endif
 
+#ifdef __FreeBSD__
+/* XXX review ptrace() usage */
+#define PTRACE_ATTACH PT_ATTACH
+#define PTRACE_CONT PT_CONTINUE
+#define PTRACE_DETACH PT_DETACH
+#endif
+
 	if (pid == 0) {
 		int ppid = getppid();
 		if (ptrace(PTRACE_ATTACH, ppid, NULL, NULL) == 0) {
@@ -440,7 +447,9 @@ int main(int argc, char *argv[])
 			run_test(t); /* never returns */
 
 #ifdef HAVE_WAITID
-		if (waitid(P_PID, pid, &info, WEXITED)) {
+//		if (waitid(P_PID, pid, &info, WEXITED)) {
+
+		if (waitid(P_ALL, 0, &info, WEXITED)) {
 			stderr_set_color(RED);
 			fprintf(stderr, "waitid failed: %m\n");
 			stderr_reset_color();
