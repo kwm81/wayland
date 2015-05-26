@@ -261,7 +261,7 @@ setup_marshal_data(struct marshal_data *data)
 }
 
 static void
-marshal_demarshal(struct marshal_data *data, 
+marshal_demarshal(struct marshal_data *data,
 		  void (*func)(void), int size, const char *format, ...)
 {
 	struct wl_closure *closure;

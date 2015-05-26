@@ -1,6 +1,5 @@
 /*
- * Copyright © 2011 Kristian Høgsberg
- * Copyright © 2011 Benjamin Franzke
+ * Copyright © 2015 Giulio Camuffo
  *
  * Permission to use, copy, modify, distribute, and sell this software and its
  * documentation for any purpose is hereby granted without fee, provided that
@@ -21,10 +20,31 @@
  * OF THIS SOFTWARE.
  */
 
-#ifndef WAYLAND_EGL_H
-#define WAYLAND_EGL_H
+#include "wayland-client-core.h"
+#include "wayland-server-core.h"
 
-#include <wayland-client.h>
-#include "wayland-egl-core.h"
-
+#ifdef WL_DISPLAY_SYNC
+#error including wayland-client-core.h imported protocol symbols!
 #endif
+#ifdef WL_DISPLAY_ERROR
+#error including wayland-server-core.h imported protocol symbols!
+#endif
+
+#ifdef WAYLAND_CLIENT_H
+#error including wayland-client-core.h included the non-core header!
+#endif
+#ifdef WAYLAND_SERVER_H
+#error including wayland-server-core.h included the non-core header!
+#endif
+
+#include "wayland-client.h"
+#include "wayland-server.h"
+
+#ifndef WL_DISPLAY_SYNC
+#error including wayland-client.h did not import protocol symbols!
+#endif
+#ifndef WL_DISPLAY_ERROR
+#error including wayland-server.h did not import protocol symbols!
+#endif
+
+int main(int argc, char **argv) { return 0; }

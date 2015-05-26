@@ -1,6 +1,5 @@
 /*
- * Copyright © 2011 Kristian Høgsberg
- * Copyright © 2011 Benjamin Franzke
+ * Copyright © 2015 Giulio Camuffo
  *
  * Permission to use, copy, modify, distribute, and sell this software and its
  * documentation for any purpose is hereby granted without fee, provided that
@@ -21,10 +20,12 @@
  * OF THIS SOFTWARE.
  */
 
-#ifndef WAYLAND_EGL_H
-#define WAYLAND_EGL_H
+#include "wayland-client-protocol.h"
+#include "wayland-server-protocol.h"
 
-#include <wayland-client.h>
-#include "wayland-egl-core.h"
-
+#ifndef WAYLAND_CLIENT_H
+#error including wayland-client-protocol.h did not include wayland-client.h!
+#endif
+#ifndef WAYLAND_SERVER_H
+#error including wayland-server-protocol.h did not include wayland-server.h!
 #endif
