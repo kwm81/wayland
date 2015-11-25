@@ -56,11 +56,6 @@ AC_CHECK_FUNCS([accept4 mkostemp posix_fallocate])
 
 AC_CHECK_HEADERS([sys/signalfd.h sys/timerfd.h])
 
-AC_CHECK_DECL(CLOCK_MONOTONIC,[],
-	      [AC_MSG_ERROR("CLOCK_MONOTONIC is needed to compile wayland")],
-	      [[#include <time.h>]])
-AC_CHECK_HEADERS([execinfo.h])
-
 # Use epoll on Linux or kqueue on BSD
 AC_CHECK_HEADERS([sys/epoll.h sys/event.h])
 if test "x$ac_cv_header_sys_epoll_h" != "xyes" && test "x$ac_cv_header_sys_event_h" != "xyes"; then
@@ -116,11 +111,12 @@ AC_SUBST([ICONDIR])
 
 if test "x$enable_libraries" = "xyes"; then
 	PKG_CHECK_MODULES(FFI, [libffi])
+dnl convert SFD_CLOEXEC and TFD_CLOEXEC to warning while figuring out how to do this.
 	AC_CHECK_DECL(SFD_CLOEXEC,[],
-		      [AC_MSG_ERROR("SFD_CLOEXEC is needed to compile wayland libraries")],
+		      [AC_MSG_WARN("SFD_CLOEXEC is needed to compile wayland libraries")],
 		      [[#include <sys/signalfd.h>]])
 	AC_CHECK_DECL(TFD_CLOEXEC,[],
-		      [AC_MSG_ERROR("TFD_CLOEXEC is needed to compile wayland libraries")],
+		      [AC_MSG_WARN("TFD_CLOEXEC is needed to compile wayland libraries")],
 		      [[#include <sys/timerfd.h>]])
 	AC_CHECK_DECL(CLOCK_MONOTONIC,[],
 		      [AC_MSG_ERROR("CLOCK_MONOTONIC is needed to compile wayland libraries")],
