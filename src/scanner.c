@@ -1,25 +1,31 @@
 /*
  * Copyright © 2008-2011 Kristian Høgsberg
  * Copyright © 2011 Intel Corporation
+ * Copyright © 2015 Red Hat, Inc.
  *
- * Permission to use, copy, modify, distribute, and sell this software and its
- * documentation for any purpose is hereby granted without fee, provided that
- * the above copyright notice appear in all copies and that both that copyright
- * notice and this permission notice appear in supporting documentation, and
- * that the name of the copyright holders not be used in advertising or
- * publicity pertaining to distribution of the software without specific,
- * written prior permission.  The copyright holders make no representations
- * about the suitability of this software for any purpose.  It is provided "as
- * is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
- * EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY SPECIAL, INDIRECT OR
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
- * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
- * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
- * OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the
+ * next paragraph) shall be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
+
+#include "config.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -29,8 +35,18 @@
 #include <ctype.h>
 #include <expat.h>
 #include <getopt.h>
+#include <limits.h>
+#include <unistd.h>
+
+#if HAVE_LIBXML
+#include <libxml/parser.h>
+#endif
 
 #include "wayland-util.h"
+
+/* Embedded wayland.dtd file, see dtddata.S */
+extern char DTD_DATA_begin;
+extern int DTD_DATA_len;
 
 enum side {
 	CLIENT,
@@ -52,6 +68,57 @@ usage(int ret)
 	                "                                 that is e.g. wayland-client-core.h instead\n"
 	                "                                 of wayland-client.h.\n");
 	exit(ret);
+}
+
+static bool
+is_dtd_valid(FILE *input)
+{
+	bool rc = true;
+#if HAVE_LIBXML
+	xmlParserCtxtPtr ctx = NULL;
+	xmlDocPtr doc = NULL;
+	xmlDtdPtr dtd = NULL;
+	xmlValidCtxtPtr	dtdctx;
+	xmlParserInputBufferPtr	buffer;
+	int fd = fileno(input);
+
+	dtdctx = xmlNewValidCtxt();
+	ctx = xmlNewParserCtxt();
+	if (!ctx || !dtdctx)
+		abort();
+
+	buffer = xmlParserInputBufferCreateMem(&DTD_DATA_begin,
+					       DTD_DATA_len,
+					       XML_CHAR_ENCODING_UTF8);
+	if (!buffer) {
+		fprintf(stderr, "Failed to init buffer for DTD.\n");
+		abort();
+	}
+
+	dtd = xmlIOParseDTD(NULL, buffer, XML_CHAR_ENCODING_UTF8);
+	if (!dtd) {
+		fprintf(stderr, "Failed to parse DTD.\n");
+		abort();
+	}
+
+	doc = xmlCtxtReadFd(ctx, fd, "protocol", NULL, 0);
+	if (!doc) {
+		fprintf(stderr, "Failed to read XML\n");
+		abort();
+	}
+
+	rc = xmlValidateDtd(dtdctx, doc, dtd);
+	xmlFreeDoc(doc);
+	xmlFreeParserCtxt(ctx);
+	xmlFreeValidCtxt(dtdctx);
+	/* xmlIOParseDTD consumes buffer */
+
+	if (lseek(fd, 0, SEEK_SET) != 0) {
+		fprintf(stderr, "Failed to reset fd, output would be garbage.\n");
+		abort();
+	}
+#endif
+	return rc;
 }
 
 #define XML_BUFFER_SIZE 4096
@@ -123,6 +190,7 @@ struct arg {
 	char *interface_name;
 	struct wl_list link;
 	char *summary;
+	char *enumeration_name;
 };
 
 struct enumeration {
@@ -131,6 +199,7 @@ struct enumeration {
 	struct wl_list entry_list;
 	struct wl_list link;
 	struct description *description;
+	bool bitfield;
 };
 
 struct entry {
@@ -165,9 +234,15 @@ fail_on_null(void *p)
 }
 
 static void *
-xmalloc(size_t s)
+zalloc(size_t s)
 {
-	return fail_on_null(malloc(s));
+	return calloc(s, 1);
+}
+
+static void *
+xzalloc(size_t s)
+{
+	return fail_on_null(zalloc(s));
 }
 
 static char *
@@ -312,6 +387,206 @@ is_nullable_type(struct arg *arg)
 	}
 }
 
+static struct message *
+create_message(struct location loc, const char *name)
+{
+	struct message *message;
+
+	message = xzalloc(sizeof *message);
+	message->loc = loc;
+	message->name = xstrdup(name);
+	message->uppercase_name = uppercase_dup(name);
+	wl_list_init(&message->arg_list);
+
+	return message;
+}
+
+static void
+free_arg(struct arg *arg)
+{
+	free(arg->name);
+	free(arg->interface_name);
+	free(arg->summary);
+	free(arg);
+}
+
+static struct arg *
+create_arg(const char *name)
+{
+	struct arg *arg;
+
+	arg = xzalloc(sizeof *arg);
+	arg->name = xstrdup(name);
+
+	return arg;
+}
+
+static bool
+set_arg_type(struct arg *arg, const char *type)
+{
+	if (strcmp(type, "int") == 0)
+		arg->type = INT;
+	else if (strcmp(type, "uint") == 0)
+		arg->type = UNSIGNED;
+	else if (strcmp(type, "fixed") == 0)
+		arg->type = FIXED;
+	else if (strcmp(type, "string") == 0)
+		arg->type = STRING;
+	else if (strcmp(type, "array") == 0)
+		arg->type = ARRAY;
+	else if (strcmp(type, "fd") == 0)
+		arg->type = FD;
+	else if (strcmp(type, "new_id") == 0)
+		arg->type = NEW_ID;
+	else if (strcmp(type, "object") == 0)
+		arg->type = OBJECT;
+	else
+		return false;
+
+	return true;
+}
+
+static void
+free_description(struct description *desc)
+{
+	if (!desc)
+		return;
+
+	free(desc->summary);
+	free(desc->text);
+
+	free(desc);
+}
+
+static void
+free_message(struct message *message)
+{
+	struct arg *a, *a_next;
+
+	free(message->name);
+	free(message->uppercase_name);
+	free_description(message->description);
+
+	wl_list_for_each_safe(a, a_next, &message->arg_list, link)
+		free_arg(a);
+
+	free(message);
+}
+
+static struct enumeration *
+create_enumeration(const char *name)
+{
+	struct enumeration *enumeration;
+
+	enumeration = xzalloc(sizeof *enumeration);
+	enumeration->name = xstrdup(name);
+	enumeration->uppercase_name = uppercase_dup(name);
+
+	wl_list_init(&enumeration->entry_list);
+
+	return enumeration;
+}
+
+static struct entry *
+create_entry(const char *name, const char *value)
+{
+	struct entry *entry;
+
+	entry = xzalloc(sizeof *entry);
+	entry->name = xstrdup(name);
+	entry->uppercase_name = uppercase_dup(name);
+	entry->value = xstrdup(value);
+
+	return entry;
+}
+
+static void
+free_entry(struct entry *entry)
+{
+	free(entry->name);
+	free(entry->uppercase_name);
+	free(entry->value);
+	free(entry->summary);
+
+	free(entry);
+}
+
+static void
+free_enumeration(struct enumeration *enumeration)
+{
+	struct entry *e, *e_next;
+
+	free(enumeration->name);
+	free(enumeration->uppercase_name);
+	free_description(enumeration->description);
+
+	wl_list_for_each_safe(e, e_next, &enumeration->entry_list, link)
+		free_entry(e);
+
+	free(enumeration);
+}
+
+static struct interface *
+create_interface(struct location loc, const char *name, int version)
+{
+	struct interface *interface;
+
+	interface = xzalloc(sizeof *interface);
+	interface->loc = loc;
+	interface->name = xstrdup(name);
+	interface->uppercase_name = uppercase_dup(name);
+	interface->version = version;
+	interface->since = 1;
+	wl_list_init(&interface->request_list);
+	wl_list_init(&interface->event_list);
+	wl_list_init(&interface->enumeration_list);
+
+	return interface;
+}
+
+static void
+free_interface(struct interface *interface)
+{
+	struct message *m, *next_m;
+	struct enumeration *e, *next_e;
+
+	free(interface->name);
+	free(interface->uppercase_name);
+	free_description(interface->description);
+
+	wl_list_for_each_safe(m, next_m, &interface->request_list, link)
+		free_message(m);
+	wl_list_for_each_safe(m, next_m, &interface->event_list, link)
+		free_message(m);
+	wl_list_for_each_safe(e, next_e, &interface->enumeration_list, link)
+		free_enumeration(e);
+
+	free(interface);
+}
+
+/* convert string to unsigned integer,
+ * in the case of error, return -1 */
+static int
+strtouint(const char *str)
+{
+	long int ret;
+	char *end;
+	int prev_errno = errno;
+
+	errno = 0;
+	ret = strtol(str, &end, 10);
+	if (errno != 0 || end == str || *end != '\0')
+		return -1;
+
+	/* check range */
+	if (ret < 0 || ret > INT_MAX) {
+		return -1;
+	}
+
+	errno = prev_errno;
+	return (int)ret;
+}
+
 static void
 start_element(void *data, const char *element_name, const char **atts)
 {
@@ -321,27 +596,26 @@ start_element(void *data, const char *element_name, const char **atts)
 	struct arg *arg;
 	struct enumeration *enumeration;
 	struct entry *entry;
-	struct description *description;
-	const char *name, *type, *interface_name, *value, *summary, *since;
-	const char *allow_null;
-	char *end;
-	int i, version;
+	struct description *description = NULL;
+	const char *name = NULL;
+	const char *type = NULL;
+	const char *interface_name = NULL;
+	const char *value = NULL;
+	const char *summary = NULL;
+	const char *since = NULL;
+	const char *allow_null = NULL;
+	const char *enumeration_name = NULL;
+	const char *bitfield = NULL;
+	int i, version = 0;
 
 	ctx->loc.line_number = XML_GetCurrentLineNumber(ctx->parser);
-	name = NULL;
-	type = NULL;
-	version = 0;
-	interface_name = NULL;
-	value = NULL;
-	summary = NULL;
-	description = NULL;
-	since = NULL;
-	allow_null = NULL;
 	for (i = 0; atts[i]; i += 2) {
 		if (strcmp(atts[i], "name") == 0)
 			name = atts[i + 1];
 		if (strcmp(atts[i], "version") == 0)
-			version = atoi(atts[i + 1]);
+			version = strtouint(atts[i + 1]);
+			if (version == -1)
+				fail(&ctx->loc, "wrong version (%s)", atts[i + 1]);
 		if (strcmp(atts[i], "type") == 0)
 			type = atts[i + 1];
 		if (strcmp(atts[i], "value") == 0)
@@ -354,6 +628,10 @@ start_element(void *data, const char *element_name, const char **atts)
 			since = atts[i + 1];
 		if (strcmp(atts[i], "allow-null") == 0)
 			allow_null = atts[i + 1];
+		if (strcmp(atts[i], "enum") == 0)
+			enumeration_name = atts[i + 1];
+		if (strcmp(atts[i], "bitfield") == 0)
+			bitfield = atts[i + 1];
 	}
 
 	ctx->character_data_length = 0;
@@ -363,7 +641,6 @@ start_element(void *data, const char *element_name, const char **atts)
 
 		ctx->protocol->name = xstrdup(name);
 		ctx->protocol->uppercase_name = uppercase_dup(name);
-		ctx->protocol->description = NULL;
 	} else if (strcmp(element_name, "copyright") == 0) {
 
 	} else if (strcmp(element_name, "interface") == 0) {
@@ -373,32 +650,16 @@ start_element(void *data, const char *element_name, const char **atts)
 		if (version == 0)
 			fail(&ctx->loc, "no interface version given");
 
-		interface = xmalloc(sizeof *interface);
-		interface->loc = ctx->loc;
-		interface->name = xstrdup(name);
-		interface->uppercase_name = uppercase_dup(name);
-		interface->version = version;
-		interface->description = NULL;
-		interface->since = 1;
-		wl_list_init(&interface->request_list);
-		wl_list_init(&interface->event_list);
-		wl_list_init(&interface->enumeration_list);
+		interface = create_interface(ctx->loc, name, version);
+		ctx->interface = interface;
 		wl_list_insert(ctx->protocol->interface_list.prev,
 			       &interface->link);
-		ctx->interface = interface;
 	} else if (strcmp(element_name, "request") == 0 ||
 		   strcmp(element_name, "event") == 0) {
 		if (name == NULL)
 			fail(&ctx->loc, "no request name given");
 
-		message = xmalloc(sizeof *message);
-		message->loc = ctx->loc;
-		message->name = xstrdup(name);
-		message->uppercase_name = uppercase_dup(name);
-		wl_list_init(&message->arg_list);
-		message->arg_count = 0;
-		message->new_id_count = 0;
-		message->description = NULL;
+		message = create_message(ctx->loc, name);
 
 		if (strcmp(element_name, "request") == 0)
 			wl_list_insert(ctx->interface->request_list.prev,
@@ -409,17 +670,11 @@ start_element(void *data, const char *element_name, const char **atts)
 
 		if (type != NULL && strcmp(type, "destructor") == 0)
 			message->destructor = 1;
-		else
-			message->destructor = 0;
 
 		if (since != NULL) {
-			int prev_errno = errno;
-			errno = 0;
-			version = strtol(since, &end, 0);
-			if (errno != 0 || end == since || *end != '\0')
-				fail(&ctx->loc,
-				     "invalid integer (%s)\n", since);
-			errno = prev_errno;
+			version = strtouint(since);
+			if (version == -1)
+				fail(&ctx->loc, "invalid integer (%s)\n", since);
 		} else {
 			version = 1;
 		}
@@ -437,28 +692,9 @@ start_element(void *data, const char *element_name, const char **atts)
 		if (name == NULL)
 			fail(&ctx->loc, "no argument name given");
 
-		arg = xmalloc(sizeof *arg);
-		arg->name = xstrdup(name);
-
-		if (strcmp(type, "int") == 0)
-			arg->type = INT;
-		else if (strcmp(type, "uint") == 0)
-			arg->type = UNSIGNED;
-		else if (strcmp(type, "fixed") == 0)
-			arg->type = FIXED;
-		else if (strcmp(type, "string") == 0)
-			arg->type = STRING;
-		else if (strcmp(type, "array") == 0)
-			arg->type = ARRAY;
-		else if (strcmp(type, "fd") == 0)
-			arg->type = FD;
-		else if (strcmp(type, "new_id") == 0) {
-			arg->type = NEW_ID;
-		} else if (strcmp(type, "object") == 0) {
-			arg->type = OBJECT;
-		} else {
+		arg = create_arg(name);
+		if (!set_arg_type(arg, type))
 			fail(&ctx->loc, "unknown type (%s)", type);
-		}
 
 		switch (arg->type) {
 		case NEW_ID:
@@ -469,8 +705,6 @@ start_element(void *data, const char *element_name, const char **atts)
 		case OBJECT:
 			if (interface_name)
 				arg->interface_name = xstrdup(interface_name);
-			else
-				arg->interface_name = NULL;
 			break;
 		default:
 			if (interface_name != NULL)
@@ -478,17 +712,24 @@ start_element(void *data, const char *element_name, const char **atts)
 			break;
 		}
 
-		if (allow_null == NULL || strcmp(allow_null, "false") == 0)
-			arg->nullable = 0;
-		else if (strcmp(allow_null, "true") == 0)
-			arg->nullable = 1;
+		if (allow_null) {
+			if (strcmp(allow_null, "true") == 0)
+				arg->nullable = 1;
+			else if (strcmp(allow_null, "false") != 0)
+				fail(&ctx->loc,
+				     "invalid value for allow-null attribute (%s)",
+				     allow_null);
+
+			if (!is_nullable_type(arg))
+				fail(&ctx->loc,
+				     "allow-null is only valid for objects, strings, and arrays");
+		}
+
+		if (enumeration_name == NULL || strcmp(enumeration_name, "") == 0)
+			arg->enumeration_name = NULL;
 		else
-			fail(&ctx->loc, "invalid value for allow-null attribute (%s)", allow_null);
+			arg->enumeration_name = xstrdup(enumeration_name);
 
-		if (allow_null != NULL && !is_nullable_type(arg))
-			fail(&ctx->loc, "allow-null is only valid for objects, strings, and arrays");
-
-		arg->summary = NULL;
 		if (summary)
 			arg->summary = xstrdup(summary);
 
@@ -498,11 +739,16 @@ start_element(void *data, const char *element_name, const char **atts)
 		if (name == NULL)
 			fail(&ctx->loc, "no enum name given");
 
-		enumeration = xmalloc(sizeof *enumeration);
-		enumeration->name = xstrdup(name);
-		enumeration->uppercase_name = uppercase_dup(name);
-		enumeration->description = NULL;
-		wl_list_init(&enumeration->entry_list);
+		enumeration = create_enumeration(name);
+
+		if (bitfield == NULL || strcmp(bitfield, "false") == 0)
+			enumeration->bitfield = false;
+		else if (strcmp(bitfield, "true") == 0)
+			enumeration->bitfield = true;
+		else
+			fail(&ctx->loc,
+                             "invalid value (%s) for bitfield attribute (only true/false are accepted)",
+                             bitfield);
 
 		wl_list_insert(ctx->interface->enumeration_list.prev,
 			       &enumeration->link);
@@ -512,10 +758,8 @@ start_element(void *data, const char *element_name, const char **atts)
 		if (name == NULL)
 			fail(&ctx->loc, "no entry name given");
 
-		entry = xmalloc(sizeof *entry);
-		entry->name = xstrdup(name);
-		entry->uppercase_name = uppercase_dup(name);
-		entry->value = xstrdup(value);
+		entry = create_entry(name, value);
+
 		if (summary)
 			entry->summary = xstrdup(summary);
 		else
@@ -526,7 +770,7 @@ start_element(void *data, const char *element_name, const char **atts)
 		if (summary == NULL)
 			fail(&ctx->loc, "description without summary");
 
-		description = xmalloc(sizeof *description);
+		description = xzalloc(sizeof *description);
 		description->summary = xstrdup(summary);
 
 		if (ctx->message)
@@ -539,6 +783,46 @@ start_element(void *data, const char *element_name, const char **atts)
 			ctx->protocol->description = description;
 		ctx->description = description;
 	}
+}
+
+static void
+verify_arguments(struct parse_context *ctx, struct wl_list *messages, struct wl_list *enumerations)
+{
+	struct message *m;
+	wl_list_for_each(m, messages, link) {
+		struct arg *a;
+		wl_list_for_each(a, &m->arg_list, link) {
+			struct enumeration *e, *f;
+
+			if (!a->enumeration_name)
+				continue;
+
+			f = NULL;
+			wl_list_for_each(e, enumerations, link) {
+				if(strcmp(e->name, a->enumeration_name) == 0)
+					f = e;
+			}
+
+			if (f == NULL)
+				fail(&ctx->loc,
+				     "could not find enumeration %s",
+				     a->enumeration_name);
+
+			switch (a->type) {
+			case INT:
+				if (f->bitfield)
+					fail(&ctx->loc,
+					     "bitfield-style enum must only be referenced by uint");
+				break;
+			case UNSIGNED:
+				break;
+			default:
+				fail(&ctx->loc,
+				     "enumeration-style argument has wrong type");
+			}
+		}
+	}
+
 }
 
 static void
@@ -564,6 +848,12 @@ end_element(void *data, const XML_Char *name)
 			     ctx->enumeration->name);
 		}
 		ctx->enumeration = NULL;
+	} else if (strcmp(name, "interface") == 0) {
+		struct interface *i = ctx->interface;
+
+		verify_arguments(ctx, &i->request_list, &i->enumeration_list);
+		verify_arguments(ctx, &i->event_list, &i->enumeration_list);
+
 	}
 }
 
@@ -982,8 +1272,9 @@ format_copyright(const char *copyright)
 		}
 
 		if (copyright[i] == '\n' || copyright[i] == '\0') {
-			printf("%s %.*s\n",
+			printf("%s%s%.*s\n",
 			       i == 0 ? "/*" : " *",
+			       i > start ? " " : "",
 			       i - start, copyright + start);
 			bol = 1;
 		}
@@ -1046,7 +1337,7 @@ get_include_name(bool core, enum side side)
 static void
 emit_header(struct protocol *protocol, enum side side)
 {
-	struct interface *i;
+	struct interface *i, *i_next;
 	struct wl_array types;
 	const char *s = (side == SERVER) ? "SERVER" : "CLIENT";
 	char **p, *prev;
@@ -1089,21 +1380,17 @@ emit_header(struct protocol *protocol, enum side side)
 		printf("struct %s;\n", *p);
 		prev = *p;
 	}
-	printf("\n");
-
-	prev = NULL;
-	wl_array_for_each(p, &types) {
-		if (prev && strcmp(*p, prev) == 0)
-			continue;
-		printf("extern const struct wl_interface "
-		       "%s_interface;\n", *p);
-		prev = *p;
-	}
-
 	wl_array_release(&types);
 	printf("\n");
 
 	wl_list_for_each(i, &protocol->interface_list, link) {
+		printf("extern const struct wl_interface "
+		       "%s_interface;\n", i->name);
+	}
+
+	printf("\n");
+
+	wl_list_for_each_safe(i, i_next, &protocol->interface_list, link) {
 
 		emit_enumerations(i);
 
@@ -1115,8 +1402,11 @@ emit_header(struct protocol *protocol, enum side side)
 		} else {
 			emit_structs(&i->event_list, i, side);
 			emit_opcodes(&i->request_list, i);
+			emit_opcode_versions(&i->request_list, i);
 			emit_stubs(&i->request_list, i);
 		}
+
+		free_interface(i);
 	}
 
 	printf("#ifdef  __cplusplus\n"
@@ -1232,7 +1522,7 @@ emit_messages(struct wl_list *message_list,
 static void
 emit_code(struct protocol *protocol)
 {
-	struct interface *i;
+	struct interface *i, *next;
 	struct wl_array types;
 	char **p, *prev;
 
@@ -1267,7 +1557,7 @@ emit_code(struct protocol *protocol)
 	}
 	printf("};\n\n");
 
-	wl_list_for_each(i, &protocol->interface_list, link) {
+	wl_list_for_each_safe(i, next, &protocol->interface_list, link) {
 
 		emit_messages(&i->request_list, i, "requests");
 		emit_messages(&i->event_list, i, "events");
@@ -1290,7 +1580,19 @@ emit_code(struct protocol *protocol)
 			printf("\t0, NULL,\n");
 
 		printf("};\n\n");
+
+		/* we won't need it any further */
+		free_interface(i);
 	}
+}
+
+static void
+free_protocol(struct protocol *protocol)
+{
+	free(protocol->name);
+	free(protocol->uppercase_name);
+	free(protocol->copyright);
+	free_description(protocol->description);
 }
 
 int main(int argc, char *argv[])
@@ -1362,23 +1664,36 @@ int main(int argc, char *argv[])
 		if (freopen(argv[2], "w", stdout) == NULL) {
 			fprintf(stderr, "Could not open output file: %s\n",
 				strerror(errno));
+			fclose(input);
 			exit(EXIT_FAILURE);
 		}
 	}
 
+	/* initialize protocol structure */
+	memset(&protocol, 0, sizeof protocol);
 	wl_list_init(&protocol.interface_list);
-	protocol.type_index = 0;
-	protocol.null_run_length = 0;
-	protocol.copyright = NULL;
 	protocol.core_headers = core_headers;
+
+	/* initialize context */
 	memset(&ctx, 0, sizeof ctx);
 	ctx.protocol = &protocol;
-
 	ctx.loc.filename = "<stdin>";
+
+	if (!is_dtd_valid(input)) {
+		fprintf(stderr,
+		"*******************************************************\n"
+		"*                                                     *\n"
+		"* WARNING: XML failed validation against built-in DTD *\n"
+		"*                                                     *\n"
+		"*******************************************************\n");
+	}
+
+	/* create XML parser */
 	ctx.parser = XML_ParserCreate(NULL);
 	XML_SetUserData(ctx.parser, &ctx);
 	if (ctx.parser == NULL) {
 		fprintf(stderr, "failed to create parser\n");
+		fclose(input);
 		exit(EXIT_FAILURE);
 	}
 
@@ -1390,6 +1705,7 @@ int main(int argc, char *argv[])
 		len = fread(buf, 1, XML_BUFFER_SIZE, input);
 		if (len < 0) {
 			fprintf(stderr, "fread: %m\n");
+			fclose(input);
 			exit(EXIT_FAILURE);
 		}
 		if (XML_ParseBuffer(ctx.parser, len, len == 0) == 0) {
@@ -1398,6 +1714,7 @@ int main(int argc, char *argv[])
 				XML_GetCurrentLineNumber(ctx.parser),
 				XML_GetCurrentColumnNumber(ctx.parser),
 				XML_ErrorString(XML_GetErrorCode(ctx.parser)));
+			fclose(input);
 			exit(EXIT_FAILURE);
 		}
 	} while (len > 0);
@@ -1415,6 +1732,9 @@ int main(int argc, char *argv[])
 			emit_code(&protocol);
 			break;
 	}
+
+	free_protocol(&protocol);
+	fclose(input);
 
 	return 0;
 }

@@ -2,23 +2,26 @@
  * Copyright © 2008-2012 Kristian Høgsberg
  * Copyright © 2010-2012 Intel Corporation
  *
- * Permission to use, copy, modify, distribute, and sell this software and its
- * documentation for any purpose is hereby granted without fee, provided that
- * the above copyright notice appear in all copies and that both that copyright
- * notice and this permission notice appear in supporting documentation, and
- * that the name of the copyright holders not be used in advertising or
- * publicity pertaining to distribution of the software without specific,
- * written prior permission.  The copyright holders make no representations
- * about the suitability of this software for any purpose.  It is provided "as
- * is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
- * EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY SPECIAL, INDIRECT OR
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
- * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
- * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
- * OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the
+ * next paragraph) shall be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 
 #define _GNU_SOURCE
@@ -154,7 +157,7 @@ display_fatal_error(struct wl_display *display, int error)
 /**
  * This function is called for error events
  * and indicates that in some object an error occurred.
- * Difference between this function and display_fatal_error()
+ * The difference between this function and display_fatal_error()
  * is that this one handles errors that will come by wire,
  * whereas display_fatal_error() is called for local errors.
  *
@@ -256,6 +259,7 @@ wl_event_queue_release(struct wl_event_queue *queue)
 {
 	struct wl_closure *closure;
 	struct wl_proxy *proxy;
+	bool proxy_destroyed;
 
 	while (!wl_list_empty(&queue->event_list)) {
 		closure = container_of(queue->event_list.next,
@@ -265,10 +269,11 @@ wl_event_queue_release(struct wl_event_queue *queue)
 		decrease_closure_args_refcount(closure);
 
 		proxy = closure->proxy;
-		if (proxy->refcount == 1)
-			proxy_destroy(proxy);
-		else
-			--proxy->refcount;
+		proxy_destroyed = !!(proxy->flags & WL_PROXY_FLAG_DESTROYED);
+
+		proxy->refcount--;
+		if (proxy_destroyed && !proxy->refcount)
+			free(proxy);
 
 		wl_closure_destroy(closure);
 	}
@@ -557,9 +562,9 @@ create_outgoing_proxy(struct wl_proxy *proxy, const struct wl_message *message,
  * \param args Extra arguments for the given request
  * \param interface The interface to use for the new proxy
  *
- * Translates the request given by opcode and the extra arguments into the
- * wire format and write it to the connection buffer.  This version takes an
- * array of the union type wl_argument.
+ * This function translates a request given an opcode, an interface and a
+ * wl_argument array to the wire format and writes it to the connection
+ * buffer.
  *
  * For new-id arguments, this function will allocate a new wl_proxy
  * and send the ID to the server.  The new wl_proxy will be returned
@@ -592,18 +597,14 @@ wl_proxy_marshal_array_constructor(struct wl_proxy *proxy,
 	}
 
 	closure = wl_closure_marshal(&proxy->object, opcode, args, message);
-	if (closure == NULL) {
-		wl_log("Error marshalling request: %m\n");
-		abort();
-	}
+	if (closure == NULL)
+		wl_abort("Error marshalling request: %s\n", strerror(errno));
 
 	if (debug_client)
 		wl_closure_print(closure, &proxy->object, true);
 
-	if (wl_closure_send(closure, proxy->display->connection)) {
-		wl_log("Error sending request: %m\n");
-		abort();
-	}
+	if (wl_closure_send(closure, proxy->display->connection))
+		wl_abort("Error sending request: %s\n", strerror(errno));
 
 	wl_closure_destroy(closure);
 
@@ -651,8 +652,10 @@ wl_proxy_marshal(struct wl_proxy *proxy, uint32_t opcode, ...)
  * \param ... Extra arguments for the given request
  * \return A new wl_proxy for the new_id argument or NULL on error
  *
- * Translates the request given by opcode and the extra arguments into the
- * wire format and write it to the connection buffer.
+ * This function translates a request given an opcode, an interface and extra
+ * arguments to the wire format and writes it to the connection buffer. The
+ * types of the extra arguments must correspond to the argument types of the
+ * method associated with the opcode in the interface.
  *
  * For new-id arguments, this function will allocate a new wl_proxy
  * and send the ID to the server.  The new wl_proxy will be returned
@@ -955,8 +958,12 @@ static const struct wl_callback_listener sync_listener = {
  * \param queue The queue on which to run the roundtrip
  * \return The number of dispatched events on success or -1 on failure
  *
- * Blocks until the server processes all currently issued requests and
- * sends out pending events on the event queue.
+ * This function blocks until the server has processed all currently issued
+ * requests by sending a request to the display server and waiting for a
+ * reply before returning.
+ *
+ * \note This function may dispatch other events being received on the given
+ * queue.
  *
  * \note This function uses wl_display_dispatch_queue() internally. If you
  * are using wl_display_read_events() from more threads, don't use this function
@@ -992,8 +999,12 @@ wl_display_roundtrip_queue(struct wl_display *display, struct wl_event_queue *qu
  * \param display The display context object
  * \return The number of dispatched events on success or -1 on failure
  *
- * Blocks until the server process all currently issued requests and
- * sends out pending events on the default event queue.
+ * This function blocks until the server has processed all currently issued
+ * requests by sending a request to the display server and waiting for a reply
+ * before returning.
+ *
+ * \note This function may dispatch other events being received on the default
+ * queue.
  *
  * \note This function uses wl_display_dispatch_queue() internally. If you
  * are using wl_display_read_events() from more threads, don't use this function
@@ -1354,20 +1365,81 @@ err:
 	return -1;
 }
 
-/** Prepare to read events from the display to this queue
+/** Prepare to read events from the display's file descriptor to a queue
  *
  * \param display The display context object
  * \param queue The event queue to use
  * \return 0 on success or -1 if event queue was not empty
  *
- * Atomically makes sure the queue is empty and stops any other thread
- * from placing events into this (or any) queue.  Caller must
- * eventually call either wl_display_cancel_read() or
- * wl_display_read_events(), usually after waiting for the
- * display fd to become ready for reading, to release the lock.
+ * This function (or wl_display_prepare_read()) must be called before reading
+ * from the file descriptor using wl_display_read_events(). Calling
+ * wl_display_prepare_read_queue() announces the calling thread's intention to
+ * read and ensures that until the thread is ready to read and calls
+ * wl_display_read_events(), no other thread will read from the file descriptor.
+ * This only succeeds if the event queue is empty, and if not -1 is returned and
+ * errno set to EAGAIN.
  *
- * \sa wl_display_prepare_read
- * \memberof wl_event_queue
+ * If a thread successfully calls wl_display_prepare_read_queue(), it must
+ * either call wl_display_read_events() when it's ready or cancel the read
+ * intention by calling wl_display_cancel_read().
+ *
+ * Use this function before polling on the display fd or integrate the fd into a
+ * toolkit event loop in a race-free way. A correct usage would be (with most
+ * error checking left out):
+ *
+ * \code
+ * while (wl_display_prepare_read_queue(display, queue) != 0)
+ *         wl_display_dispatch_queue_pending(display, queue);
+ * wl_display_flush(display);
+ *
+ * ret = poll(fds, nfds, -1);
+ * if (has_error(ret))
+ *         wl_display_cancel_read(display);
+ * else
+ *         wl_display_read_events(display);
+ *
+ * wl_display_dispatch_queue_pending(display, queue);
+ * \endcode
+ *
+ * Here we call wl_display_prepare_read_queue(), which ensures that between
+ * returning from that call and eventually calling wl_display_read_events(), no
+ * other thread will read from the fd and queue events in our queue. If the call
+ * to wl_display_prepare_read_queue() fails, we dispatch the pending events and
+ * try again until we're successful.
+ *
+ * When using wl_display_dispatch() we'd have something like:
+ *
+ * \code
+ * wl_display_dispatch_pending(display);
+ * wl_display_flush(display);
+ * poll(fds, nfds, -1);
+ * wl_display_dispatch(display);
+ * \endcode
+ *
+ * This sequence in not thread-safe. The race is immediately after poll(),
+ * where one thread could preempt and read events before the other thread calls
+ * wl_display_dispatch(). This call now blocks and starves the other
+ * fds in the event loop.
+ *
+ * Another race would be when using more event queues.
+ * When one thread calls wl_display_dispatch(_queue)(), then it
+ * reads all events from display's fd and queues them in appropriate
+ * queues. Then it dispatches only its own queue and the other events
+ * are sitting in their queues, waiting for dispatching. If that happens
+ * before the other thread managed to call poll(), it will
+ * block with events queued.
+ *
+ * The wl_display_prepare_read_queue() function doesn't acquire exclusive access
+ * to the display's fd. It only registers that the thread calling this function
+ * has intention to read from fd. When all registered readers call
+ * wl_display_read_events(), only one (at random) eventually reads and queues
+ * the events and the others are sleeping meanwhile. This way we avoid races and
+ * still can read from more threads.
+ *
+ * \sa wl_display_cancel_read(), wl_display_read_events(),
+ * wl_display_prepare_read()
+ *
+ * \memberof wl_display
  */
 WL_EXPORT int
 wl_display_prepare_read_queue(struct wl_display *display,
@@ -1395,80 +1467,11 @@ wl_display_prepare_read_queue(struct wl_display *display,
  * \param display The display context object
  * \return 0 on success or -1 if event queue was not empty
  *
- * This function must be called before reading from the file
- * descriptor using wl_display_read_events(). Calling
- * wl_display_prepare_read() announces the calling thread's intention
- * to read and ensures that until the thread is ready to read and
- * calls wl_display_read_events(), no other thread will read from the
- * file descriptor. This only succeeds if the event queue is empty
- * though, and if there are undispatched events in the queue, -1 is
- * returned and errno set to EAGAIN.
+ * This function does the same thing as wl_display_prepare_read_queue()
+ * with the default queue passed as the queue.
  *
- * If a thread successfully calls wl_display_prepare_read(), it must
- * either call wl_display_read_events() when it's ready or cancel the
- * read intention by calling wl_display_cancel_read().
- *
- * Use this function before polling on the display fd or to integrate
- * the fd into a toolkit event loop in a race-free way.
- * A correct usage would be (we left out most of error checking):
- *
- * \code
- * while (wl_display_prepare_read(display) != 0)
- *         wl_display_dispatch_pending(display);
- * wl_display_flush(display);
- *
- * ret = poll(fds, nfds, -1);
- * if (has_error(ret))
- *         wl_display_cancel_read(display);
- * else
- *         wl_display_read_events(display);
- *
- * wl_display_dispatch_pending(display);
- * \endcode
- *
- * Here we call wl_display_prepare_read(), which ensures that between
- * returning from that call and eventually calling
- * wl_display_read_events(), no other thread will read from the fd and
- * queue events in our queue. If the call to wl_display_prepare_read() fails,
- * we dispatch the pending events and try again until we're successful.
- *
- * When using wl_display_dispatch() we'd have something like:
- *
- * \code
- * wl_display_dispatch_pending(display);
- * wl_display_flush(display);
- * poll(fds, nfds, -1);
- * wl_display_dispatch(display);
- * \endcode
- *
- * This sequence in not thread-safe. The race is immediately after poll(),
- * where one thread could preempt and read events before the other thread calls
- * wl_display_dispatch(). This call now blocks and starves the other
- * fds in the event loop.
- *
- * Another race would be when using more event queues.
- * When one thread calls wl_display_dispatch(_queue)(), then it
- * reads all events from display's fd and queues them in appropriate
- * queues. Then it dispatches only its own queue and the other events
- * are sitting in their queues, waiting for dispatching. If that happens
- * before the other thread managed to call poll(), it will
- * block with events queued.
- *
- * wl_display_prepare_read() function doesn't acquire exclusive access
- * to the display's fd. It only registers that the thread calling this function
- * has intention to read from fd.
- * When all registered readers call wl_display_read_events(),
- * only one (at random) eventually reads and queues the events and the
- * others are sleeping meanwhile. This way we avoid races and still
- * can read from more threads.
- *
- * If the relevant queue is not the default queue, then
- * wl_display_prepare_read_queue() and wl_display_dispatch_queue_pending()
- * need to be used instead.
- *
- * \sa wl_display_cancel_read(), wl_display_read_events()
- *
- * \memberof wl_display
+ * \sa wl_display_prepare_read_queue
+ * \memberof wl_event_queue
  */
 WL_EXPORT int
 wl_display_prepare_read(struct wl_display *display)
@@ -1770,10 +1773,10 @@ wl_display_get_protocol_error(struct wl_display *display,
  * \param display The display context object
  * \return The number of bytes sent on success or -1 on failure
  *
- * Send all buffered data on the client side to the server. Clients
- * should call this function before blocking. On success, the number
- * of bytes sent to the server is returned. On failure, this
- * function returns -1 and errno is set appropriately.
+ * Send all buffered data on the client side to the server. Clients should
+ * always call this function before blocking on input from the display fd.
+ * On success, the number of bytes sent to the server is returned. On
+ * failure, this function returns -1 and errno is set appropriately.
  *
  * wl_display_flush() never blocks.  It will write as much data as
  * possible, but if all data could not be written, errno will be set

@@ -1,8 +1,8 @@
 AC_PREREQ([2.64])
 
 m4_define([wayland_major_version], [1])
-m4_define([wayland_minor_version], [7])
-m4_define([wayland_micro_version],  [92])
+m4_define([wayland_minor_version], [9])
+m4_define([wayland_micro_version], [90])
 m4_define([wayland_version],
           [wayland_major_version.wayland_minor_version.wayland_micro_version])
 
@@ -28,6 +28,7 @@ AM_SILENT_RULES([yes])
 AC_PROG_CC
 AC_PROG_CXX
 AC_PROG_GREP
+AM_PROG_AS
 
 # check if we have C++ compiler. This is hacky workaround,
 # for a reason why it is this way see
@@ -45,7 +46,6 @@ LT_PREREQ([2.2])
 LT_INIT
 
 PKG_PROG_PKG_CONFIG()
-PKG_CHECK_MODULES(FFI, [libffi])
 
 if test "x$GCC" = "xyes"; then
 	GCC_CFLAGS="-Wall -Wextra -Wno-unused-parameter -g -Wstrict-prototypes -Wmissing-prototypes -fvisibility=hidden"
@@ -81,11 +81,17 @@ AC_CHECK_HEADERS([sys/param.h])
 AC_CHECK_FUNCS([waitid])
 AC_CHECK_HEADERS([signal.h])
 
-AC_ARG_ENABLE([scanner],
-              [AC_HELP_STRING([--disable-scanner],
-                              [Disable compilation of wayland-scanner])],
+AC_ARG_ENABLE([libraries],
+	      [AC_HELP_STRING([--disable-libraries],
+			      [Disable compilation of wayland libraries])],
+	      [],
+	      [enable_libraries=yes])
+
+AC_ARG_WITH([host-scanner],
+              [AC_HELP_STRING([--with-host-scanner],
+                              [Use installed wayland-scanner from host PATH during build])],
               [],
-              [enable_scanner=yes])
+              [with_host_scanner=no])
 
 AC_ARG_ENABLE([documentation],
 	      [AC_HELP_STRING([--disable-documentation],
@@ -93,24 +99,50 @@ AC_ARG_ENABLE([documentation],
 	      [],
 	      [enable_documentation=yes])
 
-AM_CONDITIONAL(ENABLE_SCANNER, test "x$enable_scanner" = xyes)
+AC_ARG_ENABLE([dtd-validation],
+	      [AC_HELP_STRING([--disable-dtd-validation],
+			      [Disable DTD validation of the protocol])],
+	      [],
+	      [enable_dtdvalidation=yes])
+
+AM_CONDITIONAL(USE_HOST_SCANNER, test "x$with_host_scanner" = xyes)
+
+AM_CONDITIONAL(ENABLE_LIBRARIES, test "x$enable_libraries" = xyes)
 
 AC_ARG_WITH(icondir, [  --with-icondir=<dir>    Look for cursor icons here],
 		     [  ICONDIR=$withval],
 		     [  ICONDIR=${datadir}/icons])
 AC_SUBST([ICONDIR])
 
-if test "x$enable_scanner" = "xyes"; then
-	PKG_CHECK_MODULES(EXPAT, [expat], [],
-		[AC_CHECK_HEADERS(expat.h, [],
-			[AC_MSG_ERROR([Can't find expat.h. Please install expat.])])
-		 SAVE_LIBS="$LIBS"
-		 AC_SEARCH_LIBS(XML_ParserCreate, expat, [],
-			[AC_MSG_ERROR([Can't find expat library. Please install expat.])])
-		 EXPAT_LIBS="$LIBS"
-		 LIBS="$SAVE_LIBS"
-		 AC_SUBST(EXPAT_LIBS)
-		])
+if test "x$enable_libraries" = "xyes"; then
+	PKG_CHECK_MODULES(FFI, [libffi])
+	AC_CHECK_DECL(SFD_CLOEXEC,[],
+		      [AC_MSG_ERROR("SFD_CLOEXEC is needed to compile wayland libraries")],
+		      [[#include <sys/signalfd.h>]])
+	AC_CHECK_DECL(TFD_CLOEXEC,[],
+		      [AC_MSG_ERROR("TFD_CLOEXEC is needed to compile wayland libraries")],
+		      [[#include <sys/timerfd.h>]])
+	AC_CHECK_DECL(CLOCK_MONOTONIC,[],
+		      [AC_MSG_ERROR("CLOCK_MONOTONIC is needed to compile wayland libraries")],
+		      [[#include <time.h>]])
+	AC_CHECK_HEADERS([execinfo.h])
+fi
+
+PKG_CHECK_MODULES(EXPAT, [expat], [],
+	[AC_CHECK_HEADERS(expat.h, [],
+		[AC_MSG_ERROR([Can't find expat.h. Please install expat.])])
+	 SAVE_LIBS="$LIBS"
+	 AC_SEARCH_LIBS(XML_ParserCreate, expat, [],
+		[AC_MSG_ERROR([Can't find expat library. Please install expat.])])
+	 EXPAT_LIBS="$LIBS"
+	 LIBS="$SAVE_LIBS"
+	 AC_SUBST(EXPAT_LIBS)
+	])
+
+if test "x$enable_dtdvalidation" = "xyes"; then
+	PKG_CHECK_MODULES(LIBXML, [libxml-2.0])
+	AC_DEFINE(HAVE_LIBXML, 1, [libxml-2.0 is available])
+	AC_CONFIG_LINKS([src/wayland.dtd.embed:protocol/wayland.dtd])
 fi
 
 AC_PATH_PROG(XSLTPROC, xsltproc)

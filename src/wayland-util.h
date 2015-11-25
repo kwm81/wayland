@@ -1,23 +1,26 @@
 /*
  * Copyright © 2008 Kristian Høgsberg
  *
- * Permission to use, copy, modify, distribute, and sell this software and its
- * documentation for any purpose is hereby granted without fee, provided that
- * the above copyright notice appear in all copies and that both that copyright
- * notice and this permission notice appear in supporting documentation, and
- * that the name of the copyright holders not be used in advertising or
- * publicity pertaining to distribution of the software without specific,
- * written prior permission.  The copyright holders make no representations
- * about the suitability of this software for any purpose.  It is provided "as
- * is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
- * EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY SPECIAL, INDIRECT OR
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
- * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
- * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
- * OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the
+ * next paragraph) shall be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 
 /** \file wayland-util.h
@@ -118,12 +121,23 @@ struct wl_list {
 	struct wl_list *next;
 };
 
-void wl_list_init(struct wl_list *list);
-void wl_list_insert(struct wl_list *list, struct wl_list *elm);
-void wl_list_remove(struct wl_list *elm);
-int wl_list_length(const struct wl_list *list);
-int wl_list_empty(const struct wl_list *list);
-void wl_list_insert_list(struct wl_list *list, struct wl_list *other);
+void
+wl_list_init(struct wl_list *list);
+
+void
+wl_list_insert(struct wl_list *list, struct wl_list *elm);
+
+void
+wl_list_remove(struct wl_list *elm);
+
+int
+wl_list_length(const struct wl_list *list);
+
+int
+wl_list_empty(const struct wl_list *list);
+
+void
+wl_list_insert_list(struct wl_list *list, struct wl_list *other);
 
 /**
  * Retrieves a pointer to the containing struct of a given member item.
@@ -203,10 +217,17 @@ struct wl_array {
 	     (const char *) pos < ((const char *) (array)->data + (array)->size); \
 	     (pos)++)
 
-void wl_array_init(struct wl_array *array);
-void wl_array_release(struct wl_array *array);
-void *wl_array_add(struct wl_array *array, size_t size);
-int wl_array_copy(struct wl_array *array, struct wl_array *source);
+void
+wl_array_init(struct wl_array *array);
+
+void
+wl_array_release(struct wl_array *array);
+
+void *
+wl_array_add(struct wl_array *array, size_t size);
+
+int
+wl_array_copy(struct wl_array *array, struct wl_array *source);
 
 typedef int32_t wl_fixed_t;
 
@@ -236,11 +257,14 @@ wl_fixed_from_double(double d)
 	return u.i;
 }
 
-static inline int wl_fixed_to_int(wl_fixed_t f)
+static inline int
+wl_fixed_to_int(wl_fixed_t f)
 {
 	return f / 256;
 }
-static inline wl_fixed_t wl_fixed_from_int(int i)
+
+static inline wl_fixed_t
+wl_fixed_from_int(int i)
 {
 	return i * 256;
 }

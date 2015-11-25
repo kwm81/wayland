@@ -6,26 +6,26 @@
     Copyright © 2010-2011 Intel Corporation
     Copyright © 2012-2013 Collabora, Ltd.
 
-    Permission to use, copy, modify, distribute, and sell this
-    software and its documentation for any purpose is hereby granted
-    without fee, provided that the above copyright notice appear in
-    all copies and that both that copyright notice and this permission
-    notice appear in supporting documentation, and that the name of
-    the copyright holders not be used in advertising or publicity
-    pertaining to distribution of the software without specific,
-    written prior permission.  The copyright holders make no
-    representations about the suitability of this software for any
-    purpose.  It is provided "as is" without express or implied
-    warranty.
+    Permission is hereby granted, free of charge, to any person
+    obtaining a copy of this software and associated documentation files
+    (the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge,
+    publish, distribute, sublicense, and/or sell copies of the Software,
+    and to permit persons to whom the Software is furnished to do so,
+    subject to the following conditions:
 
-    THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS
-    SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
-    FITNESS, IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-    WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
-    AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
-    ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
-    THIS SOFTWARE.
+    The above copyright notice and this permission notice (including the
+    next paragraph) shall be included in all copies or substantial
+    portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+    BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+    ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+    CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
   </copyright>
 
   <interface name="wl_display" version="1">
@@ -367,7 +367,7 @@
 	can be used for buffers. Known formats include
 	argb8888 and xrgb8888.
       </description>
-      <arg name="format" type="uint"/>
+      <arg name="format" type="uint" enum="format"/>
     </event>
   </interface>
 
@@ -746,7 +746,7 @@
       <arg name="serial" type="uint" summary="serial of the implicit grab on the pointer"/>
     </request>
 
-    <enum name="resize">
+    <enum name="resize" bitfield="true">
       <description summary="edge values for resizing">
 	These values are used to indicate which edge of a surface
 	is being dragged in a resize operation. The server may
@@ -774,7 +774,7 @@
       </description>
       <arg name="seat" type="object" interface="wl_seat" summary="the wl_seat whose pointer is used"/>
       <arg name="serial" type="uint" summary="serial of the implicit grab on the pointer"/>
-      <arg name="edges" type="uint" summary="which edge or corner is being dragged"/>
+      <arg name="edges" type="uint" enum="resize" summary="which edge or corner is being dragged"/>
     </request>
 
     <request name="set_toplevel">
@@ -785,7 +785,7 @@
       </description>
     </request>
 
-    <enum name="transient">
+    <enum name="transient" bitfield="true">
       <description summary="details of transient behaviour">
 	These flags specify details of the expected behaviour
 	of transient surfaces. Used in the set_transient request.
@@ -807,7 +807,7 @@
       <arg name="parent" type="object" interface="wl_surface"/>
       <arg name="x" type="int"/>
       <arg name="y" type="int"/>
-      <arg name="flags" type="uint"/>
+      <arg name="flags" type="uint" enum="transient"/>
     </request>
 
     <enum name="fullscreen_method">
@@ -858,7 +858,7 @@
 	with the dimensions for the output on which the surface will
 	be made fullscreen.
       </description>
-      <arg name="method" type="uint"/>
+      <arg name="method" type="uint" enum="fullscreen_method"/>
       <arg name="framerate" type="uint"/>
       <arg name="output" type="object" interface="wl_output" allow-null="true"/>
     </request>
@@ -891,7 +891,7 @@
       <arg name="parent" type="object" interface="wl_surface"/>
       <arg name="x" type="int"/>
       <arg name="y" type="int"/>
-      <arg name="flags" type="uint"/>
+      <arg name="flags" type="uint" enum="transient"/>
     </request>
 
     <request name="set_maximized">
@@ -972,7 +972,7 @@
 	in surface local coordinates.
       </description>
 
-      <arg name="edges" type="uint"/>
+      <arg name="edges" type="uint" enum="resize"/>
       <arg name="width" type="int"/>
       <arg name="height" type="int"/>
     </event>
@@ -1095,10 +1095,8 @@
       <description summary="mark part of the surface damaged">
 	This request is used to describe the regions where the pending
 	buffer is different from the current surface contents, and where
-	the surface therefore needs to be repainted. The pending buffer
-	must be set by wl_surface.attach before sending damage. The
-	compositor ignores the parts of the damage that fall outside of
-	the surface.
+	the surface therefore needs to be repainted. The compositor
+	ignores the parts of the damage that fall outside of the surface.
 
 	Damage is double-buffered state, see wl_surface.commit.
 
@@ -1329,7 +1327,7 @@
     </request>
    </interface>
 
-  <interface name="wl_seat" version="4">
+  <interface name="wl_seat" version="5">
     <description summary="group of input devices">
       A seat is a group of keyboards, pointer and touch devices. This
       object is published as a global during start up, or when such a
@@ -1337,7 +1335,7 @@
       maintains a keyboard focus and a pointer focus.
     </description>
 
-    <enum name="capability">
+    <enum name="capability" bitfield="true">
       <description summary="seat capability bitmask">
         This is a bitmask of capabilities this seat has; if a member is
         set, then it is present on the seat.
@@ -1349,42 +1347,42 @@
 
     <event name="capabilities">
       <description summary="seat capabilities changed">
-        This is emitted whenever a seat gains or loses the pointer,
+	This is emitted whenever a seat gains or loses the pointer,
 	keyboard or touch capabilities.  The argument is a capability
 	enum containing the complete set of capabilities this seat has.
       </description>
-      <arg name="capabilities" type="uint"/>
+      <arg name="capabilities" type="uint" enum="capability"/>
     </event>
 
     <request name="get_pointer">
       <description summary="return pointer object">
-        The ID provided will be initialized to the wl_pointer interface
+	The ID provided will be initialized to the wl_pointer interface
 	for this seat.
 
-        This request only takes effect if the seat has the pointer
-        capability.
+	This request only takes effect if the seat has the pointer
+	capability.
       </description>
       <arg name="id" type="new_id" interface="wl_pointer"/>
     </request>
 
     <request name="get_keyboard">
       <description summary="return keyboard object">
-        The ID provided will be initialized to the wl_keyboard interface
+	The ID provided will be initialized to the wl_keyboard interface
 	for this seat.
 
-        This request only takes effect if the seat has the keyboard
-        capability.
+	This request only takes effect if the seat has the keyboard
+	capability.
       </description>
       <arg name="id" type="new_id" interface="wl_keyboard"/>
     </request>
 
     <request name="get_touch">
       <description summary="return touch object">
-        The ID provided will be initialized to the wl_touch interface
+	The ID provided will be initialized to the wl_touch interface
 	for this seat.
 
-        This request only takes effect if the seat has the touch
-        capability.
+	This request only takes effect if the seat has the touch
+	capability.
       </description>
       <arg name="id" type="new_id" interface="wl_touch"/>
     </request>
@@ -1399,6 +1397,15 @@
       </description>
       <arg name="name" type="string"/>
     </event>
+
+    <!-- Version 5 additions -->
+
+    <request name="release" type="destructor" since="5">
+      <description summary="release the seat object">
+      Using this request client can tell the server that it is not going to
+	use the seat object anymore.
+      </description>
+    </request>
 
   </interface>
 
@@ -1521,7 +1528,7 @@
       <arg name="serial" type="uint"/>
       <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
       <arg name="button" type="uint"/>
-      <arg name="state" type="uint"/>
+      <arg name="state" type="uint" enum="button_state"/>
     </event>
 
     <enum name="axis">
@@ -1553,7 +1560,7 @@
       </description>
 
       <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
-      <arg name="axis" type="uint"/>
+      <arg name="axis" type="uint" enum="axis"/>
       <arg name="value" type="fixed"/>
     </event>
 
@@ -1561,7 +1568,7 @@
 
     <request name="release" type="destructor" since="3">
       <description summary="release the pointer object">
-        Using this request client can tell the server that it is not going to
+	Using this request client can tell the server that it is not going to
 	use the pointer object anymore.
 
 	This request destroys the pointer proxy object, so user must not call
@@ -1593,7 +1600,7 @@
 	This event provides a file descriptor to the client which can be
 	memory-mapped to provide a keyboard mapping description.
       </description>
-      <arg name="format" type="uint"/>
+      <arg name="format" type="uint" enum="keymap_format"/>
       <arg name="fd" type="fd"/>
       <arg name="size" type="uint"/>
     </event>
@@ -1638,7 +1645,7 @@
       <arg name="serial" type="uint"/>
       <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
       <arg name="key" type="uint"/>
-      <arg name="state" type="uint"/>
+      <arg name="state" type="uint" enum="key_state"/>
     </event>
 
     <event name="modifiers">
@@ -1819,17 +1826,17 @@
 	   summary="width in millimeters of the output"/>
       <arg name="physical_height" type="int"
 	   summary="height in millimeters of the output"/>
-      <arg name="subpixel" type="int"
+      <arg name="subpixel" type="int" enum="subpixel"
 	   summary="subpixel orientation of the output"/>
       <arg name="make" type="string"
 	   summary="textual description of the manufacturer"/>
       <arg name="model" type="string"
 	   summary="textual description of the model"/>
-      <arg name="transform" type="int"
+      <arg name="transform" type="int" enum="transform"
 	   summary="transform that maps framebuffer to output"/>
     </event>
 
-    <enum name="mode">
+    <enum name="mode" bitfield="true">
       <description summary="mode information">
 	These flags describe properties of an output mode.
 	They are used in the flags bitfield of the mode event.
@@ -1856,7 +1863,7 @@
         the output may be scaled, as described in wl_output.scale,
         or transformed , as described in wl_output.transform.
       </description>
-      <arg name="flags" type="uint" summary="bitfield of mode flags"/>
+      <arg name="flags" type="uint" enum="mode" summary="bitfield of mode flags"/>
       <arg name="width" type="int" summary="width of the mode in hardware units"/>
       <arg name="height" type="int" summary="height of the mode in hardware units"/>
       <arg name="refresh" type="int" summary="vertical refresh rate in mHz"/>

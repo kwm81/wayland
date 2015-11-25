@@ -1,23 +1,26 @@
 /*
  * Copyright © 2008 Kristian Høgsberg
  *
- * Permission to use, copy, modify, distribute, and sell this software and its
- * documentation for any purpose is hereby granted without fee, provided that
- * the above copyright notice appear in all copies and that both that copyright
- * notice and this permission notice appear in supporting documentation, and
- * that the name of the copyright holders not be used in advertising or
- * publicity pertaining to distribution of the software without specific,
- * written prior permission.  The copyright holders make no representations
- * about the suitability of this software for any purpose.  It is provided "as
- * is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
- * EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY SPECIAL, INDIRECT OR
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
- * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
- * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
- * OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the
+ * next paragraph) shall be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  *
  * Authors:
  *    Kristian Høgsberg <krh@bitplanet.net>
@@ -401,41 +404,6 @@ wl_display_init_shm(struct wl_display *display)
 }
 
 WL_EXPORT struct wl_shm_buffer *
-wl_shm_buffer_create(struct wl_client *client,
-		     uint32_t id, int32_t width, int32_t height,
-		     int32_t stride, uint32_t format)
-{
-	struct wl_shm_buffer *buffer;
-
-	if (!format_is_supported(client, format))
-		return NULL;
-
-	buffer = malloc(sizeof *buffer + stride * height);
-	if (buffer == NULL)
-		return NULL;
-
-	buffer->width = width;
-	buffer->height = height;
-	buffer->format = format;
-	buffer->stride = stride;
-	buffer->offset = 0;
-	buffer->pool = NULL;
-
-	buffer->resource =
-		wl_resource_create(client, &wl_buffer_interface, 1, id);
-	if (buffer->resource == NULL) {
-		free(buffer);
-		return NULL;
-	}
-
-	wl_resource_set_implementation(buffer->resource,
-				       &shm_buffer_interface,
-				       buffer, destroy_buffer);
-
-	return buffer;
-}
-
-WL_EXPORT struct wl_shm_buffer *
 wl_shm_buffer_get(struct wl_resource *resource)
 {
 	if (resource == NULL)
@@ -473,10 +441,12 @@ wl_shm_buffer_get_stride(struct wl_shm_buffer *buffer)
 WL_EXPORT void *
 wl_shm_buffer_get_data(struct wl_shm_buffer *buffer)
 {
-	if (buffer->pool)
-		return buffer->pool->data + buffer->offset;
-	else
-		return buffer + 1;
+	assert(buffer->pool);
+
+	if (!buffer->pool)
+		return NULL;
+
+	return buffer->pool->data + buffer->offset;
 }
 
 WL_EXPORT uint32_t
@@ -495,6 +465,48 @@ WL_EXPORT int32_t
 wl_shm_buffer_get_height(struct wl_shm_buffer *buffer)
 {
 	return buffer->height;
+}
+
+/** Get a reference to a shm_buffer's shm_pool
+ *
+ * \param buffer The buffer object
+ *
+ * Returns a pointer to a buffer's shm_pool and increases the
+ * shm_pool refcount.
+ *
+ * The compositor must remember to call wl_shm_pool_unref when
+ * it no longer needs the reference to ensure proper destruction
+ * of the pool.
+ *
+ * \memberof wl_shm_buffer
+ * \sa wl_shm_pool_unref
+ */
+WL_EXPORT struct wl_shm_pool *
+wl_shm_buffer_ref_pool(struct wl_shm_buffer *buffer)
+{
+	assert(buffer->pool->refcount);
+
+	buffer->pool->refcount++;
+	return buffer->pool;
+}
+
+/** Unreference a shm_pool
+ *
+ * \param buffer The pool object
+ *
+ * Drops a reference to a wl_shm_pool object.
+ *
+ * This is only necessary if the compositor has explicitly
+ * taken a reference with wl_shm_buffer_ref_pool(), otherwise
+ * the pool will be automatically destroyed when appropriate.
+ *
+ * \memberof wl_shm_pool
+ * \sa wl_shm_buffer_ref_pool
+ */
+WL_EXPORT void
+wl_shm_pool_unref(struct wl_shm_pool *pool)
+{
+	shm_pool_unref(pool);
 }
 
 static void
@@ -658,3 +670,20 @@ wl_shm_buffer_end_access(struct wl_shm_buffer *buffer)
 		sigbus_data->current_pool = NULL;
 	}
 }
+
+/** \cond */ /* Deprecated functions below. */
+
+WL_EXPORT struct wl_shm_buffer *
+wl_shm_buffer_create(struct wl_client *client,
+		     uint32_t id, int32_t width, int32_t height,
+		     int32_t stride, uint32_t format)
+{
+	return NULL;
+}
+
+/** \endcond */
+
+/* Functions at the end of this file are deprecated.  Instead of adding new
+ * code here, add it before the comment above that states:
+ * Deprecated functions below.
+ */
