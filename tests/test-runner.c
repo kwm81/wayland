@@ -43,7 +43,9 @@
 #include <errno.h>
 #include <limits.h>
 #include <sys/ptrace.h>
+#ifdef __linux__
 #include <sys/prctl.h>
+#endif
 #ifndef PR_SET_PTRACER
 # define PR_SET_PTRACER 0x59616d61
 #endif
@@ -62,6 +64,13 @@ static void* (*sys_malloc)(size_t);
 static void (*sys_free)(void*);
 static void* (*sys_realloc)(void*, size_t);
 static void* (*sys_calloc)(size_t, size_t);
+#endif
+
+#ifdef __FreeBSD__
+/* XXX review ptrace() usage */
+#define PTRACE_ATTACH PT_ATTACH
+#define PTRACE_CONT PT_CONTINUE
+#define PTRACE_DETACH PT_DETACH
 #endif
 
 /* when set to 1, check if tests are not leaking memory and opened files.
@@ -329,7 +338,7 @@ is_debugger_attached(void)
 			_exit(1);
 		if (!waitpid(-1, NULL, 0))
 			_exit(1);
-		ptrace(PTRACE_CONT, NULL, NULL);
+		ptrace(PTRACE_CONT, ppid, NULL, NULL);
 		ptrace(PTRACE_DETACH, ppid, NULL, NULL);
 		_exit(0);
 	} else {
@@ -345,31 +354,6 @@ is_debugger_attached(void)
 			 */
 			perror("prctl");
 			write(pipefd[1], "-", 1);
-
-#if 0
-// check above code ...
-#ifdef __FreeBSD__
-/* XXX review ptrace() usage */
-#define PTRACE_ATTACH PT_ATTACH
-#define PTRACE_CONT PT_CONTINUE
-#define PTRACE_DETACH PT_DETACH
-#endif
-
-#ifdef __FreeBSD__
-/* XXX review ptrace() usage */
-#define PTRACE_ATTACH PT_ATTACH
-#define PTRACE_CONT PT_CONTINUE
-#define PTRACE_DETACH PT_DETACH
-#endif
-
-	if (pid == 0) {
-		int ppid = getppid();
-		if (ptrace(PTRACE_ATTACH, ppid, NULL, NULL) == 0) {
-			waitpid(ppid, NULL, 0);
-			ptrace(PTRACE_CONT, NULL, NULL, NULL);
-			ptrace(PTRACE_DETACH, ppid, NULL, NULL);
-			rc = 0;
-#endif
 		} else {
 			/* Signal to client that parent is ready by passing '+' */
 			write(pipefd[1], "+", 1);
@@ -450,9 +434,7 @@ int main(int argc, char *argv[])
 			run_test(t); /* never returns */
 
 #ifdef HAVE_WAITID
-//		if (waitid(P_PID, pid, &info, WEXITED)) {
-
-		if (waitid(P_ALL, 0, &info, WEXITED)) {
+		if (waitid(P_PID, 0, &info, WEXITED)) {
 			stderr_set_color(RED);
 			fprintf(stderr, "waitid failed: %m\n");
 			stderr_reset_color();
