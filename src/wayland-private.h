@@ -55,6 +55,10 @@ struct wl_object {
 extern struct wl_object global_zombie_object;
 #define WL_ZOMBIE_OBJECT ((void*)&global_zombie_object)
 
+int
+wl_interface_equal(const struct wl_interface *iface1,
+		   const struct wl_interface *iface2);
+
 /* Flags for wl_map_insert_new and wl_map_insert_at.  Flags can be queried with
  * wl_map_lookup_flags.  The current implementation has room for 1 bit worth of
  * flags.  If more flags are ever added, the implementation of wl_map will have
@@ -98,14 +102,6 @@ wl_map_lookup_flags(struct wl_map *map, uint32_t i);
 
 void
 wl_map_for_each(struct wl_map *map, wl_iterator_func_t func, void *data);
-
-struct wl_connection;
-struct wl_closure;
-struct wl_proxy;
-
-int
-wl_interface_equal(const struct wl_interface *iface1,
-		   const struct wl_interface *iface2);
 
 struct wl_connection *
 wl_connection_create(int fd);
